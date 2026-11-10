@@ -1,0 +1,21 @@
+[package]
+name = "rtop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A btop-inspired terminal resource monitor written in Rust"
+license = "MIT"
+readme = "README.md"
+keywords = ["tui", "monitor", "system", "btop", "ratatui"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ratatui = "0.30"
+sysinfo = "0.40"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
