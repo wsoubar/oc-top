@@ -42,6 +42,10 @@ recursos rápido e colorido para o terminal, com CPU, memória, rede, discos e p
  q quit │  m menu │  ↑↓ select │  f filter │  e tree │  ←→ sort │  t term │  k kill │  enter info │  +/- rate
 ```
 
+## Guia rápido
+
+![Guia rápido de uso do rtop](assets/rtop-guia.png)
+
 ## Recursos
 
 - **CPU** — gráfico de histórico em braille (ou blocos), medidores por núcleo, frequência,
