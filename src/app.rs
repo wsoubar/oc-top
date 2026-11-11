@@ -12,8 +12,10 @@ use ratatui::layout::Rect;
 use sysinfo::Signal;
 
 use crate::collect::{Collector, MAX_UPDATE_MS, MIN_UPDATE_MS, Snapshot, UPDATE_STEP_MS};
-use crate::config::{Config, GraphSymbol, SortBy};
+use crate::config::{Config, GraphSymbol, Panel, SortBy};
 use crate::theme::Theme;
+
+pub const PANEL_OPTIONS_START: usize = 7;
 
 const HISTORY_LEN: usize = 600;
 
@@ -144,6 +146,10 @@ impl App {
             return;
         }
         self.dirty = true;
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.quit = true;
+            return;
+        }
 
         if self.filter_edit {
             self.on_filter_key(key);
@@ -189,7 +195,7 @@ impl App {
 
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
         self.dirty = true;
-        if !matches!(self.overlay, Overlay::None) || self.filter_edit {
+        if !matches!(self.overlay, Overlay::None) || self.filter_edit || self.proc_area.is_empty() {
             return;
         }
 
@@ -233,7 +239,6 @@ impl App {
     fn on_main_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') => self.quit = true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => self.quit = true,
             KeyCode::Esc | KeyCode::Char('m') => {
                 self.overlay = Overlay::Menu { selected: 0 };
             }
@@ -243,6 +248,27 @@ impl App {
             KeyCode::F(2) | KeyCode::Char('o') => {
                 self.overlay = Overlay::Options { selected: 0 };
             }
+            KeyCode::Char('0') => self.config.panels.cycle_preset(true),
+            KeyCode::Char(number @ '1'..='5') => {
+                self.config
+                    .panels
+                    .toggle(Panel::ALL[(number as u8 - b'1') as usize]);
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                if self.config.tree && self.config.panels.contains(Panel::Processes) {
+                    self.set_collapsed(false);
+                } else {
+                    self.adjust_interval(UPDATE_STEP_MS as i64);
+                }
+            }
+            KeyCode::Char('-') => {
+                if self.config.tree && self.config.panels.contains(Panel::Processes) {
+                    self.set_collapsed(true);
+                } else {
+                    self.adjust_interval(-(UPDATE_STEP_MS as i64));
+                }
+            }
+            _ if !self.config.panels.contains(Panel::Processes) => {}
             KeyCode::Up => self.select_delta(-1),
             KeyCode::Down => self.select_delta(1),
             KeyCode::PageUp => {
@@ -288,20 +314,6 @@ impl App {
                     },
                     Instant::now(),
                 ));
-            }
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                if self.config.tree {
-                    self.set_collapsed(false);
-                } else {
-                    self.adjust_interval(UPDATE_STEP_MS as i64);
-                }
-            }
-            KeyCode::Char('-') => {
-                if self.config.tree {
-                    self.set_collapsed(true);
-                } else {
-                    self.adjust_interval(-(UPDATE_STEP_MS as i64));
-                }
             }
             KeyCode::Char('t') => self.start_kill(Signal::Term),
             KeyCode::Char('k') => self.start_kill(Signal::Kill),
@@ -370,7 +382,7 @@ impl App {
     }
 
     fn on_options_key(&mut self, key: KeyEvent, selected: usize) {
-        const OPTIONS: usize = 6;
+        const OPTIONS: usize = PANEL_OPTIONS_START + Panel::ALL.len();
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.overlay = Overlay::Options {
@@ -417,7 +429,11 @@ impl App {
                 self.rebuild_view();
             }
             5 => self.cycle_theme(delta),
-            _ => {}
+            6 => self.config.panels.cycle_preset(delta >= 0),
+            _ => self
+                .config
+                .panels
+                .toggle(Panel::ALL[selected - PANEL_OPTIONS_START]),
         }
         self.dirty = true;
     }

@@ -27,6 +27,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    if inner.height == 1 {
+        let meter = Meter {
+            label: "Used",
+            label_width: 4,
+            value: mem.used_pct(),
+            value_text: (inner.width >= 34).then(|| util::fmt_bytes(mem.used)),
+            gradient: theme.used,
+            theme,
+            show_pct: true,
+        };
+        frame.render_widget(meter, inner);
+        return;
+    }
+
     let mut spans = vec![
         Span::styled("Total: ", Style::default().fg(theme.inactive_fg)),
         Span::styled(
@@ -50,10 +64,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(Line::from(spans)),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
-
-    if inner.height < 2 {
-        return;
-    }
 
     let show_values = inner.width >= 34;
     let metrics: [(&str, f32, u64, Gradient); 4] = [

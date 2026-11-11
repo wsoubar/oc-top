@@ -17,7 +17,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let theme = &app.theme;
     let disks = &app.snap.disks;
-    let block = panel("disks", None, theme.mem_box, theme);
+    let block = panel("disks", Some(4), theme.mem_box, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -45,8 +45,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         inner.height as usize
     };
     let show_values = inner.width >= 34;
+    let show_overflow = disks.len() > max_rows && max_rows > 1;
+    let meter_rows = max_rows - usize::from(show_overflow);
 
-    for (index, disk) in disks.iter().take(max_rows).enumerate() {
+    for (index, disk) in disks.iter().take(meter_rows).enumerate() {
         let y = inner.y + index as u16;
         let value_text = show_values.then(|| {
             format!(
@@ -68,9 +70,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(meter, Rect::new(inner.x, y, inner.width, 1));
     }
 
-    if disks.len() > max_rows && max_rows > 0 {
+    if show_overflow {
         let y = inner.y + max_rows as u16 - 1;
-        let text = format!("+{} more", disks.len() - max_rows + 1);
+        let text = format!("+{} more", disks.len() - meter_rows);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 text,

@@ -41,7 +41,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         Style::default().fg(theme.graph_text),
     ));
 
-    let mut block = panel("proc", Some(4), theme.proc_box, &theme);
+    let mut block = panel("proc", Some(5), theme.proc_box, &theme);
     block = block.title_top(Line::from(right_spans).alignment(Alignment::Right));
     let inner = block.inner(area);
     frame.render_widget(block, area);

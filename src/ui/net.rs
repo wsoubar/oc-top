@@ -16,7 +16,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let theme = &app.theme;
-    let interface = interface_label(app);
+    let interface = util::truncate(
+        &interface_label(app),
+        usize::from(area.width.saturating_sub(10)),
+    );
     let block = panel("net", Some(3), theme.net_box, theme).title_top(
         Line::from(Span::styled(
             format!("{interface} "),
@@ -92,17 +95,28 @@ fn render_direction(frame: &mut Frame, area: Rect, app: &App, upload: bool) {
                 .fg(gradient.at(0.6))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(name, Style::default().fg(theme.inactive_fg)),
         Span::styled(
-            format!(" {}", util::fmt_speed(speed)),
+            if area.width >= 34 {
+                format!("{name} ")
+            } else {
+                String::new()
+            },
+            Style::default().fg(theme.inactive_fg),
+        ),
+        Span::styled(
+            util::fmt_speed(speed),
             Style::default()
                 .fg(theme.main_fg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  top ", Style::default().fg(theme.inactive_fg)),
-        Span::styled(util::fmt_speed(top), Style::default().fg(theme.inactive_fg)),
     ];
 
+    if area.width >= 34 {
+        spans.push(Span::styled(
+            format!("  top {}", util::fmt_speed(top)),
+            Style::default().fg(theme.inactive_fg),
+        ));
+    }
     if area.width >= 52 {
         spans.push(Span::styled(
             "  total ",

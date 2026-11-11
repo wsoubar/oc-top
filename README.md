@@ -86,6 +86,8 @@ rtop
 | `m` / `Esc` | menu principal |
 | `h` / `?` / `F1` | ajuda |
 | `o` / `F2` | opções |
+| `1` a `5` | alternar CPU, memória, rede, discos e processos |
+| `0` | alternar entre os layouts Completo, Processos e Rede |
 | `↑` / `↓` | selecionar processo |
 | `PgUp` / `PgDn` | mover uma página |
 | `Home` / `End` | primeiro / último processo |
@@ -114,9 +116,11 @@ proc_sorting = cpu       # pid | program | command | threads | user | memory | c
 proc_reversed = false
 proc_tree = false
 theme = Default
+shown_panels = cpu mem net disks proc
 ```
 
 Tudo também pode ser alterado pelo menu `o` (Options) sem editar o arquivo.
+Ao ocultar um painel, o espaço é redistribuído entre os demais. Pelo menos um painel fica visível.
 
 ## Temas
 
@@ -163,7 +167,6 @@ Feito com [ratatui](https://ratatui.rs/), [crossterm](https://github.com/crosste
 - [ ] Bateria
 - [ ] Temperatura por núcleo
 - [ ] Troca de interface de rede pelo teclado
-- [ ] Presets de layout (como no btop)
 - [ ] `--update`, `--theme` e outros argumentos de linha de comando
 - [ ] Suporte a macOS/BSD
 

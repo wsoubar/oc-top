@@ -5,6 +5,108 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Panel {
+    Cpu,
+    Memory,
+    Network,
+    Disks,
+    Processes,
+}
+
+impl Panel {
+    pub const ALL: [Self; 5] = [
+        Self::Cpu,
+        Self::Memory,
+        Self::Network,
+        Self::Disks,
+        Self::Processes,
+    ];
+
+    pub fn key(self) -> char {
+        char::from(b'1' + self as u8)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Memory => "mem",
+            Self::Network => "net",
+            Self::Disks => "disks",
+            Self::Processes => "proc",
+        }
+    }
+
+    const fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Panels(u8);
+
+impl Panels {
+    pub const COMPLETE: Self = Self(0b11111);
+    const PRESETS: [(Self, &'static str); 3] = [
+        (Self::COMPLETE, "Complete"),
+        (Self(Panel::Processes.bit()), "Processes"),
+        (Self(Panel::Network.bit()), "Network"),
+    ];
+
+    pub fn contains(self, panel: Panel) -> bool {
+        self.0 & panel.bit() != 0
+    }
+
+    pub fn toggle(&mut self, panel: Panel) {
+        let next = self.0 ^ panel.bit();
+        if next != 0 {
+            self.0 = next;
+        }
+    }
+
+    fn preset_index(self) -> Option<usize> {
+        Self::PRESETS.iter().position(|(panels, _)| *panels == self)
+    }
+
+    pub fn preset_name(self) -> &'static str {
+        self.preset_index()
+            .map_or("Custom", |index| Self::PRESETS[index].1)
+    }
+
+    pub fn cycle_preset(&mut self, forward: bool) {
+        let count = Self::PRESETS.len();
+        let next = match self.preset_index() {
+            Some(index) => (index + if forward { 1 } else { count - 1 }) % count,
+            None if forward => 0,
+            None => count - 1,
+        };
+        *self = Self::PRESETS[next].0;
+    }
+
+    fn parse(value: &str) -> Self {
+        let mut panels = 0;
+        for panel in Panel::ALL {
+            if value.split_whitespace().any(|name| name == panel.name()) {
+                panels |= panel.bit();
+            }
+        }
+        if panels == 0 {
+            Self::COMPLETE
+        } else {
+            Self(panels)
+        }
+    }
+
+    fn config_value(self) -> String {
+        Panel::ALL
+            .into_iter()
+            .filter(|panel| self.contains(*panel))
+            .map(Panel::name)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphSymbol {
     Braille,
     Block,
@@ -113,6 +215,7 @@ pub struct Config {
     pub reverse: bool,
     pub tree: bool,
     pub theme: String,
+    pub panels: Panels,
 }
 
 impl Default for Config {
@@ -124,6 +227,7 @@ impl Default for Config {
             reverse: false,
             tree: false,
             theme: "Default".to_string(),
+            panels: Panels::COMPLETE,
         }
     }
 }
@@ -163,6 +267,7 @@ impl Config {
                 "proc_sorting" => config.sort_by = SortBy::parse(value),
                 "proc_reversed" => config.reverse = parse_bool(value, config.reverse),
                 "proc_tree" => config.tree = parse_bool(value, config.tree),
+                "shown_panels" => config.panels = Panels::parse(value),
                 "theme" if !value.is_empty() => {
                     config.theme = value.to_string();
                 }
@@ -192,13 +297,15 @@ impl Config {
              proc_reversed = {}\n\
              proc_tree = {}\n\
              # name of a theme in ~/.config/rtop/themes or /usr/share/btop/themes\n\
-             theme = {}\n",
+             theme = {}\n\
+             shown_panels = {}\n",
             self.update_ms,
             self.graph_symbol.as_str(),
             self.sort_by.as_str(),
             self.reverse,
             self.tree,
-            self.theme
+            self.theme,
+            self.panels.config_value()
         );
 
         let _ = fs::write(path, contents);

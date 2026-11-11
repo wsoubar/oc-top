@@ -15,12 +15,14 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 
-use crate::app::{App, Overlay};
+use crate::app::{App, Overlay, PANEL_OPTIONS_START};
+use crate::config::Panel;
 use crate::util;
 use crate::widgets::panel;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    app.proc_area = Rect::default();
 
     if let Some(background) = app.theme.main_bg {
         frame.render_widget(
@@ -49,60 +51,102 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     let rows = Layout::vertical([
         Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .split(area);
 
     header(frame, rows[0], app);
-    body(frame, rows[1], app);
-    footer(frame, rows[2], app);
+    panel_shortcuts(frame, rows[1], app);
+    body(frame, rows[2], app);
+    footer(frame, rows[3], app);
     overlays(frame, area, app);
 }
 
-fn body(frame: &mut Frame, area: Rect, app: &mut App) {
-    if area.width >= 100 {
-        let columns = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
-            .split(area);
-        let left = Layout::vertical([Constraint::Percentage(40), Constraint::Percentage(60)])
-            .split(columns[0]);
-        let right = Layout::vertical([
-            Constraint::Percentage(30),
-            Constraint::Percentage(42),
-            Constraint::Percentage(28),
-        ])
-        .split(columns[1]);
+fn panel_shortcuts(frame: &mut Frame, area: Rect, app: &App) {
+    let theme = &app.theme;
+    let mut spans = vec![Span::styled(
+        " 0 layout │",
+        Style::default().fg(theme.hi_fg),
+    )];
+    for panel in Panel::ALL {
+        let style = if app.config.panels.contains(panel) {
+            Style::default()
+                .fg(theme.main_fg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.inactive_fg)
+        };
+        spans.push(Span::styled(
+            format!(" {} {} ", panel.key(), panel.name()),
+            style,
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
 
-        cpu::render(frame, left[0], app);
-        procs::render(frame, left[1], app);
-        net::render(frame, right[0], app);
-        mem::render(frame, right[1], app);
-        disks::render(frame, right[2], app);
-    } else if area.width >= 78 {
-        let columns = Layout::horizontal([Constraint::Percentage(52), Constraint::Percentage(48)])
-            .split(area);
-        let left = Layout::vertical([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .split(columns[0]);
-        let right = Layout::vertical([Constraint::Percentage(46), Constraint::Percentage(54)])
-            .split(columns[1]);
+fn body(frame: &mut Frame, mut area: Rect, app: &mut App) {
+    let shown = app.config.panels;
+    let has_processes = shown.contains(Panel::Processes);
+    let telemetry: Vec<_> = [Panel::Memory, Panel::Network, Panel::Disks]
+        .into_iter()
+        .filter(|panel| shown.contains(*panel))
+        .collect();
 
-        cpu::render(frame, left[0], app);
-        procs::render(frame, left[1], app);
-        net::render(frame, right[0], app);
-        mem::render(frame, right[1], app);
+    if shown.contains(Panel::Cpu) {
+        let height = if !has_processes && telemetry.is_empty() {
+            area.height
+        } else {
+            (area.height / 3).clamp(4, 12)
+        };
+        cpu::render(frame, Rect { height, ..area }, app);
+        area.y += height;
+        area.height -= height;
+    }
+
+    if telemetry.is_empty() {
+        if has_processes {
+            procs::render(frame, area, app);
+        }
+        return;
+    }
+
+    let wide = area.width >= 96;
+    if has_processes {
+        if wide {
+            let columns =
+                Layout::horizontal([Constraint::Percentage(63), Constraint::Fill(1)]).split(area);
+            procs::render(frame, columns[0], app);
+            area = columns[1];
+        } else {
+            let height = (area.height * 2 / 5).max(4);
+            procs::render(
+                frame,
+                Rect {
+                    y: area.y + height,
+                    height: area.height - height,
+                    ..area
+                },
+                app,
+            );
+            area.height = height;
+        }
+    }
+
+    let sizes = std::iter::repeat_n(Constraint::Fill(1), telemetry.len());
+    let cells = if wide && has_processes {
+        Layout::vertical(sizes).split(area)
     } else {
-        let rows = Layout::vertical([
-            Constraint::Percentage(28),
-            Constraint::Percentage(20),
-            Constraint::Percentage(24),
-            Constraint::Percentage(28),
-        ])
-        .split(area);
-
-        cpu::render(frame, rows[0], app);
-        net::render(frame, rows[1], app);
-        mem::render(frame, rows[2], app);
-        procs::render(frame, rows[3], app);
+        Layout::horizontal(sizes).split(area)
+    };
+    for (panel, cell) in telemetry.into_iter().zip(cells.iter().copied()) {
+        match panel {
+            Panel::Memory => mem::render(frame, cell, app),
+            Panel::Network => net::render(frame, cell, app),
+            Panel::Disks => disks::render(frame, cell, app),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -132,6 +176,7 @@ fn header(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme.inactive_fg),
         ),
     ]);
+    let left_width = left.width() as u16;
     frame.render_widget(Paragraph::new(left), area);
 
     if area.width >= 78 {
@@ -141,9 +186,18 @@ fn header(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             format!("{}@{} ", user, app.snap.hostname)
         };
+        let width = area.width.saturating_sub(left_width + 2);
+        let text = util::truncate(&text, usize::from(width));
         let right = Line::from(Span::styled(text, Style::default().fg(theme.inactive_fg)))
             .alignment(Alignment::Right);
-        frame.render_widget(Paragraph::new(right), area);
+        frame.render_widget(
+            Paragraph::new(right),
+            Rect {
+                x: area.right() - width,
+                width,
+                ..area
+            },
+        );
     }
 }
 
@@ -191,7 +245,7 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     let mut spans = Vec::new();
-    if app.paused {
+    if app.paused && app.config.panels.contains(Panel::Processes) {
         spans.push(Span::styled(
             " PAUSED ",
             Style::default()
@@ -202,7 +256,14 @@ fn footer(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(" │ ", Style::default().fg(theme.div_line)));
     }
 
-    let hints: &[(&str, &str)] = if area.width >= 108 {
+    let hints: &[(&str, &str)] = if !app.config.panels.contains(Panel::Processes) {
+        &[
+            ("q", "quit"),
+            ("m", "menu"),
+            ("o", "options"),
+            ("+/-", "rate"),
+        ]
+    } else if area.width >= 108 {
         HINTS_FULL
     } else if area.width >= 92 {
         HINTS_MEDIUM
@@ -312,7 +373,7 @@ fn menu(frame: &mut Frame, area: Rect, app: &App, selected: usize) {
 
 fn options(frame: &mut Frame, area: Rect, app: &App, selected: usize) {
     let theme = &app.theme;
-    let rect = popup(area, 64, 11);
+    let rect = popup(area, 64, 16);
     frame.render_widget(Clear, rect);
 
     let sort_arrow = if app.config.reverse { "↑" } else { "↓" };
@@ -332,10 +393,20 @@ fn options(frame: &mut Frame, area: Rect, app: &App, selected: usize) {
             "Tree view",
         ),
         (app.theme.name.clone(), "Theme"),
+        (app.config.panels.preset_name().to_string(), "Layout"),
     ];
 
+    debug_assert_eq!(values.len(), PANEL_OPTIONS_START);
+    let panel_values = Panel::ALL.map(|panel| {
+        let value = if app.config.panels.contains(panel) {
+            "Shown"
+        } else {
+            "Hidden"
+        };
+        (value.to_string(), panel.name())
+    });
     let mut lines = vec![Line::from("")];
-    for (index, (value, label)) in values.iter().enumerate() {
+    for (index, (value, label)) in values.iter().chain(&panel_values).enumerate() {
         let style = if index == selected {
             Style::default()
                 .fg(theme.selected_fg)
@@ -375,6 +446,12 @@ fn help(frame: &mut Frame, area: Rect, app: &App) {
     help_entry(&mut lines, theme, "m / esc", "main menu");
     help_entry(&mut lines, theme, "h / ? / F1", "this help");
     help_entry(&mut lines, theme, "o / F2", "options");
+    help_entry(
+        &mut lines,
+        theme,
+        "1–5 / 0",
+        "toggle panels / cycle layouts",
+    );
     help_entry(&mut lines, theme, "+ / -", "change update interval");
     help_section(&mut lines, theme, "Process list");
     help_entry(&mut lines, theme, "↑ / ↓", "select process");
@@ -610,6 +687,48 @@ mod tests {
     }
 
     #[test]
+    fn reflows_each_panel_combination_at_supported_sizes() {
+        use crate::config::Panels;
+
+        let mut app = App::new().expect("app");
+        for mask in 1..32 {
+            app.config.panels = Panels::COMPLETE;
+            for (index, panel) in Panel::ALL.into_iter().enumerate() {
+                if mask & (1 << index) == 0 {
+                    press(&mut app, KeyCode::Char(panel.key()));
+                }
+            }
+
+            for (width, height) in [(60, 18), (80, 24), (96, 18), (120, 36)] {
+                let output = render(&mut app, width, height);
+                for panel in Panel::ALL {
+                    let title = format!("╭{} {} ", panel.key(), panel.name());
+                    assert_eq!(
+                        output.contains(&title),
+                        app.config.panels.contains(panel),
+                        "{width}x{height}, mask {mask}, {panel:?}",
+                    );
+                }
+            }
+        }
+
+        app.config.panels = Panels::COMPLETE;
+        render(&mut app, 80, 24);
+        let complete_rows = app.proc_rows();
+        press(&mut app, KeyCode::Char('0'));
+        render(&mut app, 80, 24);
+        assert!(app.proc_rows() > complete_rows);
+
+        press(&mut app, KeyCode::Char('0'));
+        render(&mut app, 80, 24);
+        assert!(app.proc_area.is_empty());
+        press(&mut app, KeyCode::Char('3'));
+        assert_eq!(app.config.panels.preset_name(), "Network");
+        press(&mut app, KeyCode::Char('t'));
+        assert!(matches!(app.overlay, Overlay::None));
+    }
+
+    #[test]
     fn renders_the_small_terminal_fallback() {
         let mut app = App::new().expect("app");
         let output = render(&mut app, 50, 15);
@@ -644,19 +763,24 @@ mod tests {
     fn filter_and_sort_work() {
         let mut app = App::new().expect("app");
 
+        let query = app
+            .find_proc(std::process::id())
+            .expect("test process")
+            .name
+            .to_lowercase();
         press(&mut app, KeyCode::Char('f'));
-        for ch in "systemd".chars() {
+        for ch in query.chars() {
             press(&mut app, KeyCode::Char(ch));
         }
-        assert_eq!(app.filter, "systemd");
+        assert_eq!(app.filter, query);
         assert!(!app.view.is_empty());
         for item in &app.view {
             let proc = &app.snap.procs[item.proc_idx];
             assert!(
-                proc.name.to_lowercase().contains("systemd")
-                    || proc.cmd.to_lowercase().contains("systemd")
-                    || proc.user.to_lowercase().contains("systemd")
-                    || proc.pid.to_string().contains("systemd")
+                proc.name.to_lowercase().contains(&query)
+                    || proc.cmd.to_lowercase().contains(&query)
+                    || proc.user.to_lowercase().contains(&query)
+                    || proc.pid.to_string().contains(&query)
             );
         }
         press(&mut app, KeyCode::Enter);
