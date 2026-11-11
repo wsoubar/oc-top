@@ -96,21 +96,15 @@ impl Widget for Meter<'_> {
 
         let bar_start = x + 1;
         let bar_end = right_start.saturating_sub(1);
-        if bar_end > bar_start {
-            let bar_width = bar_end - bar_start;
-            for offset in 0..bar_width {
-                let position = (offset as f32 + 0.5) / bar_width as f32;
-                let filled = position * 100.0 <= value;
-                let background = if filled {
-                    self.gradient.at(position)
-                } else {
-                    self.theme.meter_bg
-                };
-                buf[(bar_start + offset, y)]
-                    .set_symbol(" ")
-                    .set_bg(background);
-            }
+        MeterBar {
+            value,
+            gradient: self.gradient,
+            background: self.theme.meter_bg,
         }
+        .render(
+            Rect::new(bar_start, y, bar_end.saturating_sub(bar_start), 1),
+            buf,
+        );
 
         if pct_width > 0 {
             let printed = util::truncate(&pct, pct_width as usize);
@@ -122,6 +116,28 @@ impl Widget for Meter<'_> {
                 printed.chars().count(),
                 Style::default().fg(self.theme.main_fg),
             );
+        }
+    }
+}
+
+pub struct MeterBar {
+    pub value: f32,
+    pub gradient: Gradient,
+    pub background: Color,
+}
+
+impl Widget for MeterBar {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        for offset in 0..area.width {
+            let position = (offset as f32 + 0.5) / area.width as f32;
+            let background = if position * 100.0 <= self.value {
+                self.gradient.at(position)
+            } else {
+                self.background
+            };
+            buf[(area.x + offset, area.y)]
+                .set_symbol(" ")
+                .set_bg(background);
         }
     }
 }

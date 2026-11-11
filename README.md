@@ -48,7 +48,7 @@ recursos rápido e colorido para o terminal, com CPU, memória, rede, discos e p
 
 ## Recursos
 
-- **CPU** — gráfico de histórico em braille (ou blocos), medidores por núcleo, frequência,
+- **CPU** — gráfico de histórico em braille (ou blocos), minigráficos por núcleo, frequência,
   temperatura, load average e modelo do processador.
 - **Memória** — RAM usada, disponível, cache e livre, além de swap, com barras em gradiente.
 - **Rede** — detecta a interface da rota padrão (`/proc/net/route`), mostra velocidade atual,

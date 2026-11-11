@@ -6,9 +6,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::App;
+use crate::app::{App, CORE_HISTORY_LEN};
+use crate::config::GraphSymbol;
 use crate::util;
-use crate::widgets::{Graph, Meter, panel};
+use crate::widgets::{Graph, panel};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if area.height < 3 || area.width < 10 {
@@ -96,8 +97,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let show_cores = body.width >= 52 && !snap.cores.is_empty();
 
     if show_cores {
-        let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
-            .split(body);
+        let columns =
+            Layout::horizontal([Constraint::Percentage(57), Constraint::Fill(1)]).split(body);
         render_graph(frame, columns[0], app);
         render_cores(frame, columns[1], app);
     } else {
@@ -110,6 +111,11 @@ fn render_graph(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
+    frame.render_widget(
+        Paragraph::new("·".repeat(usize::from(area.width)))
+            .style(Style::default().fg(app.theme.meter_bg)),
+        Rect::new(area.x, area.bottom() - 1, area.width, 1),
+    );
     let graph = Graph {
         data: &app.cpu_hist,
         max: 100.0,
@@ -128,64 +134,119 @@ fn render_cores(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let columns = if cores.len() > height && area.width >= 42 {
-        2
-    } else {
-        1
-    };
-    let mut per_column = cores.len().div_ceil(columns);
-    let mut hidden = 0;
-    if per_column > height {
-        per_column = height.saturating_sub(1).max(1);
-        hidden = cores.len().saturating_sub(per_column * columns);
+    let label_width = (cores.len() - 1).to_string().len() + 2;
+    let min_column_width = label_width + 10;
+    let columns = cores
+        .len()
+        .div_ceil(4)
+        .max(cores.len().div_ceil(height))
+        .min((usize::from(area.width) / min_column_width).max(1));
+    let column_width = usize::from(area.width) / columns;
+    let mut rows = cores.len().div_ceil(columns).min(height);
+    let overflow = cores.len() > rows * columns && rows > 1;
+    if overflow {
+        rows -= 1;
     }
-    let column_width = area.width / columns as u16;
-    let label_width = if cores.len() >= 10 { 4 } else { 3 };
+
     let theme = &app.theme;
+    let show_frequency = column_width >= label_width + 22;
+    let frequency_width = if show_frequency { 7 } else { 0 };
+    let chart_width = column_width
+        .saturating_sub(label_width + 6 + frequency_width)
+        .min(CORE_HISTORY_LEN);
 
-    for column in 0..columns {
-        for row in 0..per_column {
-            let index = column * per_column + row;
-            if index >= cores.len() {
-                break;
-            }
+    let symbols = match app.config.graph_symbol {
+        GraphSymbol::Braille => ["⣀", "⣤", "⣶", "⣿"],
+        GraphSymbol::Block => ["▂", "▄", "▆", "█"],
+    };
 
-            let y = area.y + row as u16;
-            let x = area.x + column as u16 * column_width;
-            let width = column_width.saturating_sub(1);
-            if width < 8 {
-                continue;
-            }
-
-            let frequency = app.snap.freqs.get(index).copied().unwrap_or(0);
-            let value_text = if width >= 26 && frequency > 0 {
-                Some(format!("{:.1}G", frequency as f32 / 1000.0))
+    for (index, usage) in cores.iter().take(rows * columns).copied().enumerate() {
+        let label = format!("C{index}");
+        let mut spans = vec![Span::styled(
+            format!("{label:<label_width$}"),
+            Style::default().fg(theme.main_fg),
+        )];
+        let history_start = app.core_history.len().saturating_sub(chart_width);
+        let samples = app.core_history.iter().skip(history_start);
+        let padding = chart_width - samples.len();
+        spans.push(Span::styled(
+            "·".repeat(padding),
+            Style::default().fg(theme.meter_bg),
+        ));
+        for sample in samples {
+            let value = sample.get(index).copied().unwrap_or_default() / 100.0;
+            let value = value.clamp(0.0, 1.0);
+            let (symbol, color) = if value > 0.0 {
+                let level = ((value * 4.0).ceil() as usize).saturating_sub(1);
+                (symbols[level], theme.cpu.at(value))
             } else {
-                None
+                ("·", theme.meter_bg)
             };
-
-            let label = format!("C{index}");
-            let meter = Meter {
-                label: &label,
-                label_width,
-                value: cores[index],
-                value_text,
-                gradient: theme.cpu,
-                theme,
-                show_pct: true,
-            };
-            frame.render_widget(meter, Rect::new(x, y, width, 1));
+            spans.push(Span::styled(symbol, Style::default().fg(color)));
         }
+
+        let usage = usage.clamp(0.0, 100.0);
+        spans.push(Span::styled(
+            format!(" {usage:>3.0}%"),
+            Style::default().fg(theme.cpu.at(usage / 100.0)),
+        ));
+        if show_frequency {
+            let frequency = app.snap.freqs.get(index).copied().unwrap_or_default();
+            if frequency > 0 {
+                let ghz = frequency as f32 / 1000.0;
+                spans.push(Span::styled(
+                    format!(" {ghz:>4.1}G"),
+                    Style::default().fg(theme.inactive_fg),
+                ));
+            }
+        }
+
+        let x = area.x + (index / rows * column_width) as u16;
+        let y = area.y + (index % rows) as u16;
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(x, y, column_width as u16, 1),
+        );
     }
 
-    if hidden > 0 && per_column < height {
-        let text = format!("+{hidden} cores");
+    if overflow {
+        let hidden = cores.len() - rows * columns;
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                text,
-                Style::default().fg(theme.inactive_fg),
-            ))),
-            Rect::new(area.x, area.y + per_column as u16, area.width, 1),
+            Paragraph::new(format!("+{hidden} cores"))
+                .style(Style::default().fg(theme.inactive_fg)),
+            Rect::new(area.x, area.y + rows as u16, area.width, 1),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+
+    #[test]
+    fn aligns_per_core_history_and_percentages_without_background_blocks() {
+        let mut app = App::new().expect("app");
+        app.config.graph_symbol = GraphSymbol::Braille;
+        app.snap.cores = [0.0, 4.0, 24.0, 100.0].repeat(3);
+        app.core_history = [app.snap.cores.clone()].into();
+
+        let mut terminal = Terminal::new(TestBackend::new(58, 6)).expect("terminal");
+        terminal
+            .draw(|frame| render_cores(frame, frame.area(), &app))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+
+        for x in [0, 19, 38] {
+            assert_eq!(buffer[(x, 0)].symbol(), "C");
+            assert_eq!(buffer[(x + 12, 1)].symbol(), "⣀");
+            assert_eq!(buffer[(x + 12, 3)].symbol(), "⣿");
+            for y in 0..4 {
+                assert_eq!(buffer[(x + 17, y)].symbol(), "%");
+                assert_eq!(buffer[(x + 12, y)].bg, Color::Reset);
+            }
+        }
     }
 }

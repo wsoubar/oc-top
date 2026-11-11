@@ -18,6 +18,7 @@ use crate::theme::Theme;
 pub const PANEL_OPTIONS_START: usize = 7;
 
 const HISTORY_LEN: usize = 600;
+pub const CORE_HISTORY_LEN: usize = 10;
 
 #[derive(Clone, Debug)]
 pub enum Overlay {
@@ -53,6 +54,7 @@ pub struct App {
     collector: Collector,
 
     pub cpu_hist: VecDeque<f32>,
+    pub core_history: VecDeque<Vec<f32>>,
     pub down_hist: VecDeque<f32>,
     pub up_hist: VecDeque<f32>,
     pub top_rx: f64,
@@ -94,6 +96,7 @@ impl App {
             snap,
             collector,
             cpu_hist: VecDeque::with_capacity(HISTORY_LEN),
+            core_history: VecDeque::with_capacity(CORE_HISTORY_LEN),
             down_hist: VecDeque::with_capacity(HISTORY_LEN),
             up_hist: VecDeque::with_capacity(HISTORY_LEN),
             top_rx: 0.0,
@@ -676,6 +679,10 @@ impl App {
 
     fn push_history(&mut self) {
         self.push_cpu(self.snap.cpu_usage);
+        if self.core_history.len() == CORE_HISTORY_LEN {
+            self.core_history.pop_front();
+        }
+        self.core_history.push_back(self.snap.cores.clone());
         self.push_net(self.snap.net_rx_bps as f32, self.snap.net_tx_bps as f32);
     }
 }
